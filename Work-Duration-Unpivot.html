@@ -1,0 +1,331 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Duration Report Unpivot</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+/* Layout: one column. Header, drop zone, then results (stats, options, export bar, preview table). */
+:root{
+  --bg:#f5f7f6; --surface:#ffffff; --ink:#17211e; --muted:#5d6b66; --line:#d9e0dd;
+  --accent:#0f6b57; --accent-ink:#ffffff; --accent-soft:#e1f1ec;
+  --warn:#9a5b00; --warn-soft:#fbefd9; --err:#a32424;
+  --display:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#0f1513; --surface:#172019; --ink:#e6eeea; --muted:#9aaba4; --line:#2a3a33;
+  --accent:#4fc3a6; --accent-ink:#06211a; --accent-soft:#16332b;
+  --warn:#f0b45a; --warn-soft:#33270f; --err:#ff8a8a; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0f1513; --surface:#172019; --ink:#e6eeea; --muted:#9aaba4; --line:#2a3a33;
+  --accent:#4fc3a6; --accent-ink:#06211a; --accent-soft:#16332b;
+  --warn:#f0b45a; --warn-soft:#33270f; --err:#ff8a8a; color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font:15px/1.5 var(--display);
+  padding-block:28px 56px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+main{max-width:1080px;margin:0 auto;display:flex;flex-direction:column;gap:20px;min-width:0}
+h1{font-size:1.6rem;line-height:1.2;margin:0;font-weight:600;text-wrap:balance}
+.lede{margin:6px 0 0;color:var(--muted);max-width:65ch}
+.shape{display:grid;grid-template-columns:1fr 1fr;gap:12px;align-items:stretch}
+@media (max-width:640px){.shape{grid-template-columns:1fr}}
+.shape figure{margin:0;background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:12px;min-width:0}
+.shape figcaption{font-size:.72rem;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-bottom:8px}
+.mini{font:12px/1.45 var(--mono);overflow-x:auto;white-space:pre;color:var(--ink)}
+#drop{border:1.5px dashed var(--accent);background:var(--accent-soft);border-radius:6px;padding:26px 18px;text-align:center;cursor:pointer;transition:background .15s}
+#drop.over{background:var(--surface)}
+#drop:focus-visible,button:focus-visible,select:focus-visible,input:focus-visible+label{outline:3px solid var(--accent);outline-offset:2px}
+#drop strong{display:block;font-size:1.05rem}
+#drop span{color:var(--muted);font-size:.9rem}
+#file{position:absolute;width:1px;height:1px;opacity:0}
+button{font:inherit;cursor:pointer;border-radius:5px;border:1px solid var(--line);background:var(--surface);color:var(--ink);padding:9px 14px;min-height:40px}
+button.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent);font-weight:600}
+button:disabled{opacity:.5;cursor:not-allowed}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:16px;min-width:0}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px}
+.stat b{display:block;font:500 1.35rem var(--mono);font-variant-numeric:tabular-nums}
+.stat span{font-size:.75rem;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.meta{color:var(--muted);font-size:.9rem;margin:0 0 12px}
+.bar{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+.bar .grow{flex:1}
+.opts{display:flex;flex-wrap:wrap;gap:8px 20px;margin-top:12px;font-size:.9rem}
+.opts label{display:flex;gap:6px;align-items:center}
+.tabs{display:flex;gap:6px;margin-bottom:10px}
+.tabs button[aria-pressed="true"]{background:var(--accent-soft);border-color:var(--accent);font-weight:600}
+.tablewrap{overflow:auto;max-height:480px;border:1px solid var(--line);border-radius:5px}
+table{border-collapse:collapse;width:100%;font:12.5px/1.4 var(--mono);font-variant-numeric:tabular-nums}
+th,td{padding:5px 10px;border-bottom:1px solid var(--line);white-space:nowrap;text-align:left}
+th{position:sticky;top:0;background:var(--accent-soft);font-weight:500}
+td.n{text-align:right}
+.note{font-size:.85rem;color:var(--muted)}
+#msg{min-height:1.4em;font-size:.9rem}
+#msg.err{color:var(--err)} #msg.warn{color:var(--warn)}
+.hint{background:var(--warn-soft);color:var(--warn);padding:8px 12px;border-radius:5px;font-size:.88rem}
+</style>
+</head><body>
+
+<main>
+  <header>
+    <h1>Work Duration Report Unpivot</h1>
+    <p class="lede">Upload the biometric "Monthly Status Report (Detailed Work Duration)" workbook. Each employee's Status, InTime, OutTime, Duration, Late By, Early By, OT and Shift rows become columns, with one row per employee per day. Everything runs in your browser; the file is not uploaded anywhere.</p>
+  </header>
+
+  <div class="shape" aria-label="Before and after layout">
+    <figure><figcaption>Before: days across, measures down</figcaption>
+<div class="mini">Employee: NSLTZP101 : Jimmy Jhora
+Days      1 T    2 W    3 Th
+Status    A      P      P
+InTime           09:36  09:27
+OutTime          17:48  17:50
+Duration  00:00  8:12   8:23</div></figure>
+    <figure><figcaption>After: one row per employee per day</figcaption>
+<div class="mini">Code       Name        Date        Status InTime OutTime DurMins
+NSLTZP101  Jimmy Jhora 2026-09-01  A                     0
+NSLTZP101  Jimmy Jhora 2026-09-02  P      09:36  17:48   492
+NSLTZP101  Jimmy Jhora 2026-09-03  P      09:27  17:50   503</div></figure>
+  </div>
+
+  <div id="drop" tabindex="0" role="button" aria-label="Choose or drop the Excel report">
+    <strong>Drop the .xlsx report here, or click to choose</strong>
+    <span>Works with one or many departments in the same sheet</span>
+    <input id="file" type="file" accept=".xlsx,.xls,.xlsm">
+  </div>
+  <div id="msg" role="status"></div>
+
+  <section id="result" hidden class="panel" style="display:flex;flex-direction:column;gap:16px">
+    <p class="meta" id="meta"></p>
+    <div class="stats" id="stats"></div>
+    <div class="bar">
+      <button class="primary" id="dlXlsx">Download Excel (2 sheets)</button>
+      <button id="dlCsv">Download daily CSV</button>
+      <button id="dlSum">Download summary CSV</button>
+      <button id="copy">Copy table</button>
+      <span class="note grow" id="saveNote"></span>
+    </div>
+    <div class="opts">
+      <label><input type="checkbox" id="optAbsent" checked> Keep rows for absent days</label>
+      <label><input type="checkbox" id="optMins" checked> Add numeric minutes columns</label>
+      <label><input type="checkbox" id="optAll" checked> Keep employees with no attendance</label>
+    </div>
+    <div>
+      <div class="tabs">
+        <button id="tabDaily" aria-pressed="true">Daily rows</button>
+        <button id="tabSum" aria-pressed="false">Employee summary</button>
+      </div>
+      <div class="tablewrap"><table id="tbl"></table></div>
+      <p class="note" id="prevNote"></p>
+    </div>
+    <p class="note">In Power BI: Get Data, Excel workbook (or Text/CSV), pick the Attendance table. Date is a real date, duration columns are in minutes so they sum and average directly. Employee_Summary joins on EmployeeCode.</p>
+  </section>
+</main>
+
+<script>
+(function(){
+  var $=function(id){return document.getElementById(id)};
+  var LABELS={'status':'Status','intime':'InTime','outtime':'OutTime','duration':'Duration','late by':'LateBy','early by':'EarlyBy','ot':'OT','shift':'Shift'};
+  var MONTHS=['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'];
+  var DAYN=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  var SUMKEYS=[['Total Work Duration','TotalWork',1],['Total OT','TotalOT',1],['Present','Present',0],['Absent','Absent',0],['WeeklyOff','WeeklyOff',0],['Holidays','Holidays',0],['LeavesTaken','LeavesTaken',0],['LateBy Hrs','LateByHrs',1],['LateBy Days','LateByDays',0],['EarlyBy Hrs','EarlyByHrs',1],['EarlyGoing Days','EarlyGoingDays',0],['Total Duration(+OT)','TotalDurationOT',1],['Average Working Hrs','AvgWorking',1]];
+  var state={daily:[],summary:[],shiftKeys:[],name:'WorkDuration',view:'daily'};
+
+  function s(v){return v==null?'':String(v).trim()}
+  function mins(t){var m=/^(\d+):(\d{2})$/.exec(t);return m?(+m[1])*60+(+m[2]):''}
+  function esc(k){return k.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')}
+
+  function parsePeriod(aoa){
+    for(var r=0;r<Math.min(aoa.length,15);r++)for(var c=0;c<aoa[r].length;c++){
+      var m=/([A-Za-z]{3})[a-z]*\s+(\d{1,2})\s+(\d{4})\s+To\s+([A-Za-z]{3})[a-z]*\s+(\d{1,2})\s+(\d{4})/i.exec(s(aoa[r][c]));
+      if(m){var mi=MONTHS.indexOf(m[1].toLowerCase());if(mi>=0)return {y:+m[3],m:mi,d:+m[2],text:m[0]}}
+    }
+    return null;
+  }
+  function firstAfter(row,from){for(var c=from;c<row.length;c++){if(s(row[c])!=='')return {c:c,v:s(row[c])}}return null}
+
+  function convert(aoa){
+    var period=parsePeriod(aoa), company='', dept='', cols=[], emp=null, daily=[], summary=[], shiftSet={}, warnings=[];
+    var dayDates=[];
+    function buildDates(){
+      dayDates=[];
+      var y=period?period.y:new Date().getFullYear(), m=period?period.m:0, prev=0;
+      cols.forEach(function(cd,i){
+        if(i>0&&cd.day<prev){m++;if(m>11){m=0;y++}}
+        prev=cd.day;
+        dayDates.push(new Date(Date.UTC(y,m,cd.day)));
+      });
+    }
+    function flush(){
+      if(!emp)return;
+      var vals=emp.vals;
+      cols.forEach(function(cd,i){
+        var dt=dayDates[i], v=function(k){var a=vals[k];return a?s(a[cd.col]):''};
+        var d=dt, row={Company:company,Department:dept,EmployeeCode:emp.code,EmployeeName:emp.name,
+          Date:d,DayOfMonth:cd.day,DayName:DAYN[d.getUTCDay()],
+          Status:v('Status'),InTime:v('InTime'),OutTime:v('OutTime'),
+          Duration:v('Duration'),DurationMins:mins(v('Duration')),
+          LateBy:v('LateBy'),LateByMins:mins(v('LateBy')),
+          EarlyBy:v('EarlyBy'),EarlyByMins:mins(v('EarlyBy')),
+          OT:v('OT'),OTMins:mins(v('OT')),Shift:v('Shift')};
+        daily.push(row);
+      });
+      var t=emp.summaryText||'', srow={Company:company,Department:dept,EmployeeCode:emp.code,EmployeeName:emp.name};
+      SUMKEYS.forEach(function(k){
+        var m=new RegExp(esc(k[0])+':\\s*([\\d:]+)').exec(t);
+        var val=m?m[1]:'';
+        if(k[2]){srow[k[1]]=val;srow[k[1]+'Mins']=mins(val)}else srow[k[1]]=val===''?'':+val;
+      });
+      var sm=/Shift Count:\s*([^\n]*)/.exec(t);
+      if(sm){var re=/([A-Za-z0-9_]+):(\d+)/g,p;while((p=re.exec(sm[1]))){srow['Shifts_'+p[1]]=+p[2];shiftSet['Shifts_'+p[1]]=1}}
+      summary.push(srow);
+      emp=null;
+    }
+
+    for(var r=0;r<aoa.length;r++){
+      var row=aoa[r], a=s(row[0]), al=a.toLowerCase();
+      if(al==='company:'){var f=firstAfter(row,1);if(f)company=f.v;continue}
+      if(al==='department:'){flush();var f2=firstAfter(row,1);dept=f2?f2.v:'';continue}
+      if(al==='days'){
+        flush();cols=[];
+        for(var c=1;c<row.length;c++){var m=/^(\d{1,2})\b/.exec(s(row[c]));if(m)cols.push({col:c,day:+m[1]})}
+        buildDates();continue;
+      }
+      if(al==='employee:'){
+        flush();
+        var f3=firstAfter(row,1);
+        if(!f3)continue;
+        var parts=f3.v.split(/\s*:\s*/), code=parts.length>1?parts.shift():'', name=parts.join(' : ');
+        var sf=firstAfter(row,f3.c+1);
+        emp={code:code,name:name||f3.v,vals:{},summaryText:sf?sf.v:''};
+        continue;
+      }
+      if(emp&&LABELS[al])emp.vals[LABELS[al]]=row;
+    }
+    flush();
+    if(!cols.length)warnings.push('No "Days" header row was found, so no daily rows could be built.');
+    if(!period)warnings.push('Could not read the report period, so dates may use the wrong month or year.');
+    return {daily:daily,summary:summary,shiftKeys:Object.keys(shiftSet).sort(),company:company,period:period,warnings:warnings};
+  }
+
+  /* ---- output shaping ---- */
+  var DAILY_BASE=['Company','Department','EmployeeCode','EmployeeName','Date','DayOfMonth','DayName','Status','InTime','OutTime','Duration','DurationMins','LateBy','LateByMins','EarlyBy','EarlyByMins','OT','OTMins','Shift'];
+  function opts(){return {absent:$('optAbsent').checked,mins:$('optMins').checked,all:$('optAll').checked}}
+  function dailyRows(){
+    var o=opts(), rows=state.daily;
+    if(!o.all){var has={};state.daily.forEach(function(r){if(r.Status==='P'||r.InTime)has[r.EmployeeCode]=1});rows=rows.filter(function(r){return has[r.EmployeeCode]})}
+    if(!o.absent)rows=rows.filter(function(r){return r.Status!=='A'});
+    return rows;
+  }
+  function dailyCols(){return opts().mins?DAILY_BASE:DAILY_BASE.filter(function(c){return !/Mins$/.test(c)})}
+  function sumCols(){
+    var c=['Company','Department','EmployeeCode','EmployeeName'];
+    SUMKEYS.forEach(function(k){c.push(k[1]);if(k[2]&&opts().mins)c.push(k[1]+'Mins')});
+    return c.concat(state.shiftKeys);
+  }
+  function sumRows(){
+    var o=opts();
+    return o.all?state.summary:state.summary.filter(function(r){return (r.Present||0)>0});
+  }
+  function iso(d){return d.toISOString().slice(0,10)}
+  function fmt(v){return v instanceof Date?iso(v):v}
+
+  function toCsv(cols,rows){
+    var q=function(v){v=fmt(v);if(v==null)v='';v=String(v);return /[",\n\r]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v};
+    return '﻿'+[cols.join(',')].concat(rows.map(function(r){return cols.map(function(c){return q(r[c])}).join(',')})).join('\r\n');
+  }
+  function toTsv(cols,rows){
+    return [cols.join('\t')].concat(rows.map(function(r){return cols.map(function(c){var v=fmt(r[c]);return v==null?'':String(v).replace(/[\t\r\n]+/g,' ')}).join('\t')})).join('\n');
+  }
+  function sheetFrom(cols,rows){
+    var data=rows.map(function(r){var o={};cols.forEach(function(c){o[c]=r[c]===''?null:r[c]});return o});
+    var ws=XLSX.utils.json_to_sheet(data,{header:cols,cellDates:true});
+    ws['!cols']=cols.map(function(c){return {wch:Math.max(c.length+2,c==='EmployeeName'?24:c==='Date'?12:10)}});
+    var ref=XLSX.utils.decode_range(ws['!ref']);
+    for(var R=1;R<=ref.e.r;R++)cols.forEach(function(c,C){if(c==='Date'){var cell=ws[XLSX.utils.encode_cell({r:R,c:C})];if(cell){cell.z='yyyy-mm-dd'}}});
+    ws['!autofilter']={ref:ws['!ref']};
+    return ws;
+  }
+  function xlsxBytes(){
+    var wb=XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb,sheetFrom(dailyCols(),dailyRows()),'Attendance');
+    XLSX.utils.book_append_sheet(wb,sheetFrom(sumCols(),sumRows()),'Employee_Summary');
+    return XLSX.write(wb,{bookType:'xlsx',type:'array',cellDates:true});
+  }
+
+  /* ---- UI ---- */
+  function msg(t,cls){var m=$('msg');m.textContent=t||'';m.className=cls||''}
+  function renderTable(){
+    var isDaily=state.view==='daily', cols=isDaily?dailyCols():sumCols(), rows=isDaily?dailyRows():sumRows(), max=150;
+    var h='<thead><tr>'+cols.map(function(c){return '<th>'+c+'</th>'}).join('')+'</tr></thead><tbody>';
+    rows.slice(0,max).forEach(function(r){
+      h+='<tr>'+cols.map(function(c){var v=fmt(r[c]);var num=typeof v==='number';return '<td'+(num?' class="n"':'')+'>'+(v==null?'':String(v).replace(/&/g,'&amp;').replace(/</g,'&lt;'))+'</td>'}).join('')+'</tr>';
+    });
+    $('tbl').innerHTML=h+'</tbody>';
+    $('prevNote').textContent='Showing '+Math.min(max,rows.length)+' of '+rows.length.toLocaleString()+' rows. Downloads include every row.';
+    $('tabDaily').setAttribute('aria-pressed',isDaily);$('tabSum').setAttribute('aria-pressed',!isDaily);
+  }
+  function renderStats(){
+    var rows=dailyRows(), emps={};rows.forEach(function(r){emps[r.EmployeeCode]=1});
+    var pres=rows.filter(function(r){return r.Status==='P'}).length;
+    var dates=rows.map(function(r){return +r.Date});
+    var st=[['Employees',Object.keys(emps).length],['Daily rows',rows.length],['Present days',pres],['Columns',dailyCols().length]];
+    $('stats').innerHTML=st.map(function(x){return '<div class="stat"><b>'+x[1].toLocaleString()+'</b><span>'+x[0]+'</span></div>'}).join('');
+  }
+  function refresh(){renderStats();renderTable()}
+
+  function note(t){$('saveNote').textContent=t;}
+  function save(filename,data){
+    var blob=data instanceof Blob?data:new Blob([data],{type:'text/csv;charset=utf-8'});
+    var a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=filename;
+    document.body.appendChild(a);a.click();a.remove();
+    setTimeout(function(){URL.revokeObjectURL(a.href)},4000);
+    note('Saved '+filename+' to your Downloads folder.');
+  }
+  function baseName(){return state.name.replace(/\.[^.]+$/,'')+'_unpivoted'}
+
+  function handleFile(f){
+    if(!f)return;
+    msg('Reading '+f.name+'…');
+    var fr=new FileReader();
+    fr.onerror=function(){msg('Could not read that file.','err')};
+    fr.onload=function(){
+      try{
+        var wb=XLSX.read(new Uint8Array(fr.result),{type:'array'});
+        var ws=wb.Sheets[wb.SheetNames[0]];
+        var aoa=XLSX.utils.sheet_to_json(ws,{header:1,raw:false,defval:''});
+        var res=convert(aoa);
+        if(!res.daily.length){msg('No employee blocks found. This tool expects rows labelled Employee:, Status, InTime, OutTime, Duration, Late By, Early By, OT and Shift, with a Days header row.','err');return}
+        state.daily=res.daily;state.summary=res.summary;state.shiftKeys=res.shiftKeys;state.name=f.name;
+        $('meta').textContent=f.name+(res.company?'  ·  '+res.company:'')+(res.period?'  ·  '+res.period.text:'');
+        $('result').hidden=false;
+        refresh();
+        msg(res.warnings.join(' '),res.warnings.length?'warn':'');
+      }catch(e){msg('That file could not be parsed as an Excel workbook.','err');console.error(e)}
+    };
+    fr.readAsArrayBuffer(f);
+  }
+
+  var drop=$('drop'),inp=$('file');
+  drop.addEventListener('click',function(){inp.click()});
+  drop.addEventListener('keydown',function(e){if(e.key==='Enter'||e.key===' '){e.preventDefault();inp.click()}});
+  inp.addEventListener('change',function(){handleFile(inp.files[0])});
+  ['dragenter','dragover'].forEach(function(ev){drop.addEventListener(ev,function(e){e.preventDefault();drop.classList.add('over')})});
+  ['dragleave','drop'].forEach(function(ev){drop.addEventListener(ev,function(e){e.preventDefault();drop.classList.remove('over')})});
+  drop.addEventListener('drop',function(e){handleFile(e.dataTransfer.files[0])});
+
+  ['optAbsent','optMins','optAll'].forEach(function(id){$(id).addEventListener('change',refresh)});
+  $('tabDaily').addEventListener('click',function(){state.view='daily';renderTable()});
+  $('tabSum').addEventListener('click',function(){state.view='sum';renderTable()});
+  $('dlXlsx').addEventListener('click',function(){save(baseName()+'.xlsx',new Blob([xlsxBytes()]))});
+  $('dlCsv').addEventListener('click',function(){save(baseName()+'_daily.csv',toCsv(dailyCols(),dailyRows()))});
+  $('dlSum').addEventListener('click',function(){save(baseName()+'_summary.csv',toCsv(sumCols(),sumRows()))});
+  $('copy').addEventListener('click',function(){
+    var isDaily=state.view==='daily';
+    var t=isDaily?toTsv(dailyCols(),dailyRows()):toTsv(sumCols(),sumRows());
+    var ok=function(){note('Copied '+(isDaily?'daily rows':'summary')+'. Paste into Excel or Power BI Enter Data.')};
+    var fail=function(){note('Copy was blocked. Use a download button instead.')};
+    try{navigator.clipboard.writeText(t).then(ok,fail)}catch(e){fail()}
+  });
+
+  window.__convert=convert;
+})();
+</script>
+
+</body></html>
